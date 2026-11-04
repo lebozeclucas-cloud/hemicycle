@@ -31,6 +31,7 @@ SOURCES = {
 }
 UA = {"User-Agent": "hemicycle-app/1.0 (open data reader)"}
 RECENT_VOTES_PER_DEPUTE = 80
+TODAY = datetime.now(timezone.utc).date().isoformat()
 
 # Thèmes détectés par mots-clés dans les titres officiels (transparent, sans jugement).
 THEMES = {
@@ -216,7 +217,7 @@ def parse_dossiers(z, leg):
         for t in top:
             sub = []
             walk_actes([t], sub)
-            dates = sorted(d10(s.get("dateActe")) for s in sub if d10(s.get("dateActe")))
+            dates = sorted(x for x in (d10(s.get("dateActe")) for s in sub) if x and x <= TODAY)
             all_dates += dates
             code = t.get("codeActe") or ""
             if code.startswith("PROM") or any((s.get("codeActe") or "").startswith("PROM") for s in sub):
@@ -347,6 +348,27 @@ def build(out, leg=None, local=None):
     index, details = parse_scrutins(open_zip("scrutins", leg, local), leg, vote_to_dossier)
     log(f"  {len(index)} scrutins")
 
+    # rattachement par titre pour les scrutins sans lien officiel
+    # (ex. « l'amendement n° 12 … du projet de loi de finances pour 2027 (première lecture) »)
+    def key(s):
+        s = norm(s).replace("’", "'")
+        s = re.sub(r"\s*\((premiere|deuxieme|nouvelle|troisieme)[^)]*\)\s*", " ", s)
+        return re.sub(r"[\s.]+$", "", re.sub(r"\s+", " ", s)).strip()
+
+    by_title = defaultdict(list)
+    for d in dossiers.values():
+        by_title[key(d["titre"])].append(d["id"])
+    rx = re.compile(r"((?:projet|proposition) de (?:loi|resolution)[^()]*)")
+    for it in index:
+        if it["dossier"]:
+            continue
+        m = rx.search(key(it["titre"]))
+        if m:
+            ids = by_title.get(m.group(1).strip(), [])
+            if len(ids) == 1:
+                it["dossier"] = ids[0]
+                details[it["id"]]["dossier"] = ids[0]
+
     # liens dossier -> scrutins
     for it in index:
         if it["dossier"] in dossiers:
@@ -397,10 +419,52 @@ def build(out, leg=None, local=None):
     log(f"OK → {out}")
 
 
+def make_icons(icons_dir):
+    """Dessine les icônes PNG de l'appli (pur Python, sans dépendance)."""
+    import struct
+    import zlib
+
+    os.makedirs(icons_dir, exist_ok=True)
+    bg, fg, mid = (27, 28, 30), (246, 244, 239), (150, 149, 146)
+    for size in (192, 512):
+        path = os.path.join(icons_dir, f"icon-{size}.png")
+        if os.path.exists(path):
+            continue
+        k = size / 512
+        cx, cy, w = 256 * k, 340 * k, 17 * k
+        rings = ((160 * k, fg), (88 * k, mid))
+        rows = []
+        for y in range(size):
+            row = bytearray(b"\x00")
+            for x in range(size):
+                c = bg
+                dx, dy = x + 0.5 - cx, y + 0.5 - cy
+                r = (dx * dx + dy * dy) ** 0.5
+                for rr, col in rings:
+                    if dy <= 0 and abs(r - rr) <= w:
+                        c = col
+                    for ex in (cx - rr, cx + rr):
+                        if (x + 0.5 - ex) ** 2 + dy * dy <= w * w:
+                            c = col
+                if r <= 26 * k:
+                    c = fg
+                row += bytes(c)
+            rows.append(bytes(row))
+
+        def chunk(t, d):
+            return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+
+        png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        png += chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b"")
+        with open(path, "wb") as f:
+            f.write(png)
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="app/data")
     p.add_argument("--legislature", type=int)
     p.add_argument("--local", help="dossier contenant les zips (pour tester sans réseau)")
     a = p.parse_args()
+    make_icons(os.path.join(os.path.dirname(os.path.abspath(a.out)), "icons"))
     build(a.out, a.legislature, a.local)
