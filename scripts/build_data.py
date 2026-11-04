@@ -251,7 +251,9 @@ def parse_dossiers(z, leg):
 
 
 # ---------- scrutins ----------
-POSITIONS = {"pour": "pour", "contre": "contre", "abstentions": "abst", "nonVotants": "nv"}
+# l'open data écrit « pours » / « contres » au pluriel ; on accepte les deux formes
+POSITIONS = {"pours": "pour", "pour": "pour", "contres": "contre", "contre": "contre",
+             "abstentions": "abst", "abstention": "abst", "nonVotants": "nv", "nonVotant": "nv"}
 
 
 def kind_of(titre, type_lib):
@@ -292,7 +294,7 @@ def parse_scrutins(z, leg, vote_to_dossier):
                 bloc = nomi.get(raw) or {}
                 ids = [txt(x.get("acteurRef")) for x in as_list(bloc.get("votant")) if isinstance(x, dict)]
                 if ids:
-                    noms[short] = ids
+                    noms.setdefault(short, []).extend(ids)
             groupes.append({
                 "g": txt(g.get("organeRef")),
                 "m": to_int(g.get("nombreMembresGroupe")),

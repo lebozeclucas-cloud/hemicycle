@@ -100,32 +100,32 @@ for x in range(6):
 with zipfile.ZipFile(os.path.join(out, "Scrutins.json.zip"), "w") as z:
     for vid, n, date, objet in scrutins:
         lean = {g[0]: random.choice(["pour", "contre", "abstention"]) for g in GROUPES}
-        groupes, tot = [], {"pour": 0, "contre": 0, "abstentions": 0}
+        groupes, tot = [], {"pours": 0, "contres": 0, "abstentions": 0}
         for gid, _, _, _, size in GROUPES:
             members = [p for p, g in acteurs if g == gid]
-            nomi = {"pour": [], "contre": [], "abstentions": [], "nonVotants": []}
+            nomi = {"pours": [], "contres": [], "abstentions": [], "nonVotants": []}
             for p in members:
                 r = random.random()
                 if r < 0.25:
                     continue
                 pos = lean[gid] if r < 0.9 else random.choice(["pour", "contre", "abstention"])
-                key = "abstentions" if pos == "abstention" else pos
+                key = "abstentions" if pos == "abstention" else pos + "s"
                 nomi[key].append({"acteurRef": p, "mandatRef": "PM0", "parDelegation": "false"})
-            dv = {k: str(len(v)) for k, v in nomi.items()}
+            dv = {k.replace("pours", "pour").replace("contres", "contre"): str(len(v)) for k, v in nomi.items()}
             for k in tot:
                 tot[k] += len(nomi[k])
             groupes.append({"organeRef": gid, "nombreMembresGroupe": str(size),
                             "vote": {"positionMajoritaire": lean[gid], "decompteVoix": dv,
                                      "decompteNominatif": {k: ({"votant": v if len(v) != 1 else v[0]} if v else None) for k, v in nomi.items()}}})
-        exp = tot["pour"] + tot["contre"]
-        adopte = tot["pour"] > tot["contre"]
+        exp = tot["pours"] + tot["contres"]
+        adopte = tot["pours"] > tot["contres"]
         s = {"scrutin": {"uid": vid, "numero": str(n), "legislature": "17", "dateScrutin": date[:10],
              "typeVote": {"codeTypeVote": "SPO", "libelleTypeVote": "scrutin public ordinaire"},
              "sort": {"code": "adopté" if adopte else "rejeté"}, "titre": objet,
              "demandeur": {"texte": "Président du groupe « Groupe Alpha »"},
              "syntheseVote": {"nombreVotants": str(exp + tot["abstentions"]), "suffragesExprimes": str(exp),
                               "nbrSuffragesRequis": str(exp // 2 + 1),
-                              "decompte": {"pour": str(tot["pour"]), "contre": str(tot["contre"]), "abstentions": str(tot["abstentions"]), "nonVotants": "0"}},
+                              "decompte": {"pour": str(tot["pours"]), "contre": str(tot["contres"]), "abstentions": str(tot["abstentions"]), "nonVotants": "0"}},
              "ventilationVotes": {"organe": {"organeRef": "PO838901", "groupes": {"groupe": groupes}}}}}
         z.writestr(f"json/{vid}.json", json.dumps(s, ensure_ascii=False))
 
