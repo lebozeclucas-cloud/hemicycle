@@ -179,7 +179,9 @@ def parse_acteurs(z, leg):
             if m.get("typeOrgane") == "GP" and actif and org:
                 gp = txt(org[0])
         lieu = ((an or {}).get("election") or {}).get("lieu") or {}
+        debut = d10(((an or {}).get("mandature") or {}).get("datePriseFonction")) or d10((an or {}).get("dateDebut"))
         deputes[uid] = {
+            "debut": debut,
             "id": uid,
             "civ": ident.get("civ") or "",
             "prenom": ident.get("prenom") or "",
@@ -326,6 +328,117 @@ def parse_scrutins(z, leg, vote_to_dossier):
 
 
 # ---------- assemblage ----------
+MAJ = {"pour": "pour", "contre": "contre", "abstention": "abst", "abstentions": "abst", "abst": "abst"}
+
+
+def pct(a, b):
+    return round(100 * a / b, 1) if b else None
+
+
+def compute_stats(index, details, deputes, groupes, dossiers):
+    """Indicateurs factuels calculés uniquement à partir des scrutins publics."""
+    import bisect
+
+    sieges = defaultdict(int)
+    for d in deputes.values():
+        sieges[d["groupe"]] += 1
+    for gid, g in groupes.items():
+        g["sieges"] = sieges.get(gid, 0)
+    actifs = {gid for gid, g in groupes.items() if g["sieges"] > 0}
+
+    mois = defaultdict(lambda: {"n": 0, "adopte": 0, "rejete": 0})
+    types = defaultdict(int)
+    gacc = defaultdict(lambda: [0.0, 0, 0.0, 0])  # cohésion somme, n, participation somme, n
+    pair = defaultdict(lambda: [0, 0])
+    dep = defaultdict(lambda: {"nb": 0, "loy": 0, "loy_n": 0, "acc": defaultdict(lambda: [0, 0]), "mois": defaultdict(int)})
+
+    for it in index:
+        det = details[it["id"]]
+        m = it["date"][:7]
+        mois[m]["n"] += 1
+        if it["sort"] in ("adopte", "rejete"):
+            mois[m][it["sort"]] += 1
+        types[it["k"]] += 1
+        majs = {}
+        for g in det["groupes"]:
+            mk = MAJ.get((g["maj"] or "").lower(), "")
+            exp = g["pour"] + g["contre"] + g["abst"]
+            if mk and exp:
+                majs[g["g"]] = mk
+            if g["m"]:
+                a = gacc[g["g"]]
+                a[2] += min(exp / g["m"], 1)
+                a[3] += 1
+                if mk and exp:
+                    a[0] += g[mk] / exp
+                    a[1] += 1
+        ids = sorted(k for k in majs if k in actifs)
+        for i, g1 in enumerate(ids):
+            for g2 in ids[i + 1:]:
+                p = pair[(g1, g2)]
+                p[1] += 1
+                p[0] += majs[g1] == majs[g2]
+        for g in det["groupes"]:
+            own = majs.get(g["g"])
+            for pos, pids in g["noms"].items():
+                if pos == "nv":
+                    continue
+                for pid in pids:
+                    ds = dep[pid]
+                    ds["nb"] += 1
+                    ds["mois"][m] += 1
+                    if own:
+                        ds["loy_n"] += 1
+                        ds["loy"] += pos == own
+                    for og, om in majs.items():
+                        if og in actifs:
+                            ac = ds["acc"][og]
+                            ac[1] += 1
+                            ac[0] += pos == om
+
+    for gid, g in groupes.items():
+        a = gacc.get(gid)
+        g["cohesion"] = pct(a[0], a[1]) if a else None
+        g["participation"] = pct(a[2], a[3]) if a else None
+
+    accords = defaultdict(dict)
+    for (g1, g2), (same, tot) in pair.items():
+        v = pct(same, tot)
+        accords[g1][g2] = accords[g2][g1] = v
+
+    dates = sorted(it["date"] for it in index)
+    out_dep = {}
+    for pid, d in deputes.items():
+        ds = dep.get(pid)
+        depuis = len(dates) - bisect.bisect_left(dates, d.get("debut") or "")
+        nb = ds["nb"] if ds else 0
+        out_dep[pid] = {
+            "nb": nb,
+            "depuis": depuis,
+            "part": pct(nb, depuis),
+            "loyaute": pct(ds["loy"], ds["loy_n"]) if ds else None,
+            "accords": {g: pct(a, t) for g, (a, t) in ds["acc"].items() if t >= 20} if ds else {},
+            "mois": sorted(ds["mois"].items())[-24:] if ds else [],
+        }
+
+    themes = defaultdict(lambda: {"textes": 0, "promulgues": 0})
+    for d in dossiers.values():
+        for t in d["themes"]:
+            themes[t]["textes"] += 1
+            themes[t]["promulgues"] += d["promulgue"]
+
+    return {
+        "deputes": out_dep,
+        "global": {
+            "mois": [dict(m=k, **v) for k, v in sorted(mois.items())],
+            "types": dict(types),
+            "accords": accords,
+            "themes": dict(themes),
+            "sort": {"adopte": sum(1 for i in index if i["sort"] == "adopte"), "rejete": sum(1 for i in index if i["sort"] == "rejete")},
+        },
+    }
+
+
 def write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -383,6 +496,8 @@ def build(out, leg=None, local=None):
                     if len(histo[pid]) < RECENT_VOTES_PER_DEPUTE:
                         histo[pid].append({"s": it["id"], "p": pos})
 
+    stats = compute_stats(index, details, deputes, groupes, dossiers)
+
     tmp = out + ".tmp"
     shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp)
@@ -395,17 +510,14 @@ def build(out, leg=None, local=None):
     write_json(os.path.join(tmp, "dossiers.json"), dos_list)
 
     dep_list = sorted(deputes.values(), key=lambda d: norm(d["nom"] + " " + d["prenom"]))
-    write_json(os.path.join(tmp, "deputes.json"), dep_list)
+    write_json(os.path.join(tmp, "deputes.json"), [
+        dict(d, **{k: stats["deputes"].get(d["id"], {}).get(k) for k in ("part", "loyaute", "nb")}) for d in dep_list
+    ])
     for uid, d in deputes.items():
-        write_json(os.path.join(tmp, "deputes", uid + ".json"), dict(d, votes=histo.get(uid, [])))
+        write_json(os.path.join(tmp, "deputes", uid + ".json"), dict(d, votes=histo.get(uid, []), **stats["deputes"].get(uid, {})))
 
-    # nombre de sièges par groupe (députés en exercice)
-    sieges = defaultdict(int)
-    for d in deputes.values():
-        sieges[d["groupe"]] += 1
-    for gid, g in groupes.items():
-        g["sieges"] = sieges.get(gid, 0)
     write_json(os.path.join(tmp, "groupes.json"), groupes)
+    write_json(os.path.join(tmp, "stats.json"), stats["global"])
 
     write_json(os.path.join(tmp, "meta.json"), {
         "legislature": leg,
