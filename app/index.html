@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hémicycle</title>
+  <meta name="description" content="Les votes et les lois de l'Assemblée nationale, en faits, sans commentaire.">
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131415" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Hémicycle">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a href="#/" class="brand" aria-label="Accueil">
+      <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><path d="M3 24a13 13 0 0 1 26 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M8.5 24a7.5 7.5 0 0 1 15 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" opacity=".55"/><circle cx="16" cy="24" r="2" fill="currentColor"/></svg>
+      <span>Hémicycle</span>
+    </a>
+    <a href="#/lexique" class="icon-btn" aria-label="Lexique">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 17a3 3 0 0 1 3-3h10" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </a>
+  </header>
+
+  <div id="ptr" class="ptr" aria-hidden="true"><span></span></div>
+  <main id="view" tabindex="-1"></main>
+
+  <nav class="tabs" aria-label="Navigation principale">
+    <a href="#/" data-tab="actu"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg><span>Actu</span></a>
+    <a href="#/textes" data-tab="textes"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg><span>Textes</span></a>
+    <a href="#/deputes" data-tab="deputes"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><span>Députés</span></a>
+    <a href="#/favoris" data-tab="favoris"><svg viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"/></svg><span>Favoris</span></a>
+    <a href="#/recherche" data-tab="recherche"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg><span>Recherche</span></a>
+  </nav>
+
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <div class="sheet-grip"></div>
+      <h3 id="sheet-title"></h3>
+      <p id="sheet-body"></p>
+      <button class="btn" data-close>Fermer</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
