@@ -388,6 +388,8 @@ def compute_stats(index, details, deputes, groupes, dossiers):
                 for pid in pids:
                     ds = dep[pid]
                     ds["nb"] += 1
+                    if it["date"] >= (deputes.get(pid) or {}).get("debut", ""):
+                        ds["nb_mandat"] = ds.get("nb_mandat", 0) + 1
                     ds["mois"][m] += 1
                     if own:
                         ds["loy_n"] += 1
@@ -413,11 +415,11 @@ def compute_stats(index, details, deputes, groupes, dossiers):
     for pid, d in deputes.items():
         ds = dep.get(pid)
         depuis = len(dates) - bisect.bisect_left(dates, d.get("debut") or "")
-        nb = ds["nb"] if ds else 0
+        nb = ds.get("nb_mandat", 0) if ds else 0
         out_dep[pid] = {
             "nb": nb,
             "depuis": depuis,
-            "part": pct(nb, depuis),
+            "part": min(pct(nb, depuis), 100.0) if depuis else None,
             "loyaute": pct(ds["loy"], ds["loy_n"]) if ds else None,
             "accords": {g: pct(a, t) for g, (a, t) in ds["acc"].items() if t >= 20} if ds else {},
             "mois": sorted(ds["mois"].items())[-24:] if ds else [],
