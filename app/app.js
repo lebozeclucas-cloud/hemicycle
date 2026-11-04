@@ -103,6 +103,75 @@ const ICON = {
   ext: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg>`,
 };
 
+/* ---------- graphiques (SVG/HTML maison, hors ligne) ---------- */
+function hemiLayout(n) {
+  const rows = Math.max(3, Math.min(12, Math.round(Math.sqrt(n / 2.4))));
+  const radii = Array.from({ length: rows }, (_, i) => 0.36 + (0.64 * i) / Math.max(rows - 1, 1));
+  const tot = radii.reduce((a, b) => a + b, 0);
+  const counts = radii.map((r) => Math.max(1, Math.round((n * r) / tot)));
+  counts[rows - 1] += n - counts.reduce((a, b) => a + b, 0);
+  const seats = [];
+  let dot = 1;
+  radii.forEach((r, i) => {
+    const k = counts[i];
+    if (k > 0) dot = Math.min(dot, (Math.PI * r) / Math.max(k, 1) / 2.25, 0.64 / rows / 2.25);
+    for (let j = 0; j < k; j++) {
+      const a = k === 1 ? Math.PI / 2 : Math.PI * (1 - j / (k - 1));
+      seats.push({ a, x: Math.cos(a) * r, y: -Math.sin(a) * r });
+    }
+  });
+  seats.sort((p, q) => q.a - p.a);
+  return { seats, dot };
+}
+/* items : [{c: couleur, t: info-bulle, g: id de groupe}] dans l'ordre gauche → droite */
+function hemicycle(items, { bands = [] } = {}) {
+  if (!items.length) return "";
+  const { seats, dot } = hemiLayout(items.length);
+  const ranges = {};
+  items.forEach((it, i) => { if (it.g) { const a = seats[i].a; const r = (ranges[it.g] ||= [a, a]); r[0] = Math.min(r[0], a); r[1] = Math.max(r[1], a); } });
+  const arc = (a0, a1, R) => `M${Math.cos(a1) * R},${-Math.sin(a1) * R} A${R},${R} 0 0 1 ${Math.cos(a0) * R},${-Math.sin(a0) * R}`;
+  return `<svg class="hemi" viewBox="-1.1 -1.12 2.2 1.18" role="img" aria-label="Hémicycle">
+    ${bands.map((b) => ranges[b.g] ? `<path d="${arc(ranges[b.g][0] - 0.012, ranges[b.g][1] + 0.012, 1.07)}" style="stroke:${esc(b.c)}" stroke-width=".035" fill="none" stroke-linecap="round"><title>${esc(b.t)}</title></path>` : "").join("")}
+    ${items.map((it, i) => `<circle cx="${seats[i].x.toFixed(4)}" cy="${seats[i].y.toFixed(4)}" r="${dot.toFixed(4)}" style="fill:${esc(it.c)}"><title>${esc(it.t)}</title></circle>`).join("")}
+  </svg>`;
+}
+function hbars(rows, { max = 100, unit = "%", color } = {}) {
+  return `<div class="hbars">${rows.map((r) => `<a class="hbar" ${r.href ? `href="${r.href}"` : ""}>
+    <span class="hb-l">${r.dot ? `<i class="gdot" style="background:${esc(r.dot)}"></i>` : ""}${esc(r.l)}</span>
+    <span class="hb-t"><i style="width:${Math.max(0, Math.min(100, (100 * (r.v || 0)) / max))}%;background:${esc(r.c || color || "var(--ink)")}"></i></span>
+    <b>${r.v == null ? "—" : String(r.v).replace(".", ",") + unit}</b></a>`).join("")}</div>`;
+}
+function monthBars(mois, { stacked = true } = {}) {
+  if (!mois.length) return "";
+  const max = Math.max(...mois.map((m) => m.n || m[1] || 0), 1);
+  const M = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  return `<div class="mbars">${mois.map((m) => {
+    const key = m.m || m[0], n = m.n ?? m[1];
+    const [y, mo] = key.split("-");
+    const tip = `${MOIS[+mo - 1]} ${y} : ${n}`;
+    const seg = stacked && m.n ? `<i class="c" style="height:${(100 * m.rejete) / max}%"></i><i class="p" style="height:${(100 * m.adopte) / max}%"></i><i class="a" style="height:${(100 * (m.n - m.adopte - m.rejete)) / max}%"></i>`
+      : `<i class="p" style="height:${(100 * n) / max}%"></i>`;
+    return `<div class="mb" title="${esc(tip)}"><div class="mb-col">${seg}</div><span>${+mo === 1 ? y.slice(2) : M[+mo - 1]}</span></div>`;
+  }).join("")}</div>`;
+}
+function donut(parts, label) {
+  const tot = parts.reduce((s, p) => s + p.v, 0) || 1;
+  let off = 0;
+  const C = 2 * Math.PI * 15.9155;
+  return `<div class="donut-wrap"><svg viewBox="0 0 42 42" class="donut">
+    <circle cx="21" cy="21" r="15.9155" fill="none" style="stroke:var(--surface-2)" stroke-width="6"/>
+    ${parts.map((p) => { const len = (C * p.v) / tot; const s = `<circle cx="21" cy="21" r="15.9155" fill="none" style="stroke:${p.c}" stroke-width="6" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off + C / 4}"><title>${esc(p.l)} : ${p.v}</title></circle>`; off += len; return s; }).join("")}
+    <text x="21" y="22.5" text-anchor="middle" class="donut-t">${esc(label)}</text></svg>
+    <div class="legend" style="flex-direction:column;gap:6px">${parts.map((p) => `<span><i class="dot" style="background:${p.c}"></i>${esc(p.l)} <b>${nf(p.v)}</b> <span class="muted">(${Math.round((100 * p.v) / tot)} %)</span></span>`).join("")}</div></div>`;
+}
+function compositionHemi(gs) {
+  return hemicycle(gs.flatMap((g) => Array.from({ length: g.sieges }, () => ({ c: g.couleur || "var(--ink-3)", t: `${g.nom} · ${g.sieges} sièges` })))) +
+    `<div class="seat-legend">${gs.map((g) => `<a href="#/groupe/${esc(g.id)}"><i class="gdot" style="display:inline-block;width:9px;height:9px;background:${esc(g.couleur || "var(--ink-3)")};margin-right:4px"></i>${esc(g.sigle || g.nom)} <b>${g.sieges}</b></a>`).join("")}</div>`;
+}
+const tile = (v, l, sub) => `<div class="tile"><b>${v}</b><span>${l}</span>${sub ? `<small>${sub}</small>` : ""}</div>`;
+const fpct = (v) => (v == null ? "—" : String(v).replace(".", ",") + " %");
+const howto = (txt) => `<details class="howto"><summary>Comment c'est calculé ?</summary><p>${txt}</p></details>`;
+
 function voteBar(s, big) {
   const t = s.pour + s.contre + s.abst;
   return `<div class="vbar${big ? " big" : ""}" role="img" aria-label="${s.pour} pour, ${s.contre} contre, ${s.abst} abstentions">
@@ -216,6 +285,17 @@ async function viewScrutin(id) {
     <h1 class="page-title" style="font-size:23px;margin-top:4px">${esc(cap(s.titre))}</h1>
     <div style="margin:12px 0 18px">${sortBadge(s)}</div>
     <div class="card">
+      ${hemicycle(gs.flatMap((g) => {
+        const gi = groupes[g.g] || {}, name = gi.sigle || gi.nom || "";
+        const ids = g.noms || {};
+        const vot = ["pour", "contre", "abst", "nv"].reduce((n, p) => n + (ids[p] ? ids[p].length : g[p] || 0), 0);
+        const col = { pour: "var(--pour)", contre: "var(--contre)", abst: "var(--abst)", nv: "var(--nv)" };
+        const lab = { pour: "Pour", contre: "Contre", abst: "Abstention", nv: "Non-votant" };
+        const seatsOf = (p) => (ids[p] || Array.from({ length: g[p] || 0 })).map((pid) => ({ c: col[p], g: g.g, t: `${byId[pid] ? byId[pid].prenom + " " + byId[pid].nom : name} · ${lab[p]}` }));
+        return [...seatsOf("pour"), ...seatsOf("contre"), ...seatsOf("abst"), ...seatsOf("nv"),
+          ...Array.from({ length: Math.max(0, g.m - vot) }, () => ({ c: "var(--absent)", g: g.g, t: `${name} · n'a pas voté` }))];
+      }), { bands: gs.map((g) => ({ g: g.g, c: (groupes[g.g] || {}).couleur || "var(--ink-3)", t: (groupes[g.g] || {}).nom || "" })) })}
+      <div class="legend" style="justify-content:center;margin:2px 0 14px"><span><i class="dot p"></i>Pour</span><span><i class="dot c"></i>Contre</span><span><i class="dot a"></i>Abstention</span><span><i class="dot" style="background:var(--absent)"></i>N'a pas voté</span></div>
       ${voteBar(s, true)}
       <div class="legend"><span><i class="dot p"></i>Pour <b>${s.pour}</b></span><span><i class="dot c"></i>Contre <b>${s.contre}</b></span><span><i class="dot a"></i>Abstention <b>${s.abst}</b></span></div>
       <dl class="kv" style="margin-top:14px">
@@ -238,7 +318,7 @@ async function viewScrutin(id) {
           </button>
           ${voteBar(g)}
           <div class="grp-nums"><span>Pour ${g.pour}</span><span>Contre ${g.contre}</span><span>Abst. ${g.abst}</span>${g.nv ? `<span>${term("non-votant", "Non-votants")} ${g.nv}</span>` : ""}</div>
-          <div class="grp-list">${Object.entries(g.noms || {}).map(([p, ids]) => `<h4>${posLabel[p]} (${ids.length})</h4><div>${ids.map(nameOf).join(", ")}</div>`).join("") || `<div class="muted">Pas de détail nominatif.</div>`}</div>
+          <div class="grp-list"><a href="#/groupe/${esc(g.g)}" class="small">Voir le groupe →</a>${Object.entries(g.noms || {}).map(([p, ids]) => `<h4>${posLabel[p]} (${ids.length})</h4><div>${ids.map(nameOf).join(", ")}</div>`).join("") || `<div class="muted">Pas de détail nominatif.</div>`}</div>
         </div>`;
       }).join("")}
     </div>
@@ -321,9 +401,8 @@ async function viewDeputes() {
     <h1 class="page-title">Députés</h1>
     <p class="page-sub">${deps.length} députés en exercice.</p>
     <div class="card">
-      <div class="seats">${gs.map((g) => `<i title="${esc(g.nom)}" style="width:${pct(g.sieges, total)}%;background:${esc(g.couleur || "var(--ink-3)")}"></i>`).join("")}</div>
-      <div class="seat-legend">${gs.map((g) => `<span><i class="gdot" style="display:inline-block;width:9px;height:9px;background:${esc(g.couleur || "var(--ink-3)")};margin-right:4px"></i>${esc(g.sigle || g.nom)} ${g.sieges}</span>`).join("")}</div>
-      <p class="notice" style="margin-top:8px">Groupes classés par nombre de sièges.</p>
+      ${compositionHemi(gs)}
+      <p class="notice" style="margin-top:8px">${total} sièges occupés · groupes classés par nombre de sièges. Touche un groupe pour le détail.</p>
     </div>
     <div class="row2">
       <div class="field"><input id="q" type="search" placeholder="Nom du député" autocomplete="off"></div>
@@ -363,10 +442,20 @@ async function viewDepute(id) {
     <div class="card" style="margin-top:16px"><dl class="kv">
       <dt>Circonscription</dt><dd>${esc(d.dep)}${d.circo ? ` · ${esc(d.circo)}e` : ""}</dd>
       ${d.profession ? `<dt>Profession</dt><dd>${esc(d.profession)}</dd>` : ""}
-      <dt>${term("groupe", "Groupe")}</dt><dd>${esc(g.sigle || "")} ${g.sigle ? "·" : ""} ${esc(g.nom || "—")}</dd>
+      <dt>${term("groupe", "Groupe")}</dt><dd><a href="#/groupe/${esc(d.groupe)}" style="text-decoration:underline">${esc(g.sigle || "")} ${g.sigle ? "·" : ""} ${esc(g.nom || "—")}</a></dd>
+      ${d.debut ? `<dt>Mandat depuis</dt><dd>${fdate(d.debut)}</dd>` : ""}
     </dl></div>
+    <div class="tiles">
+      ${tile(fpct(d.part), "Participation", `${nf(d.nb)} votes sur ${nf(d.depuis)} scrutins`)}
+      ${tile(fpct(d.loyaute), "Vote comme son groupe", "position majoritaire")}
+    </div>
+    ${howto("Participation : nombre de scrutins publics auxquels le député a pris part (pour, contre ou abstention) divisé par le nombre de scrutins publics depuis le début de son mandat. Les travaux en commission, les délégations et les absences justifiées ne sont pas pris en compte. « Vote comme son groupe » : part de ses votes identiques à la position majoritaire de son groupe lors du même scrutin.")}
+    ${d.mois && d.mois.length ? `<h2 class="section-title">Votes par mois</h2><div class="card">${monthBars(d.mois, { stacked: false })}</div>` : ""}
+    ${Object.keys(d.accords || {}).length ? `<h2 class="section-title">Proximité de vote avec chaque groupe</h2>
+      <div class="card">${hbars(Object.entries(d.accords).filter(([gid]) => groupes[gid]).sort((a, b) => b[1] - a[1]).map(([gid, v]) => ({ l: groupes[gid].sigle || groupes[gid].nom, v, c: groupes[gid].couleur, href: `#/groupe/${gid}` })))}</div>
+      ${howto("Part des scrutins où ce député a voté comme la position majoritaire de chaque groupe. Calculé sur les scrutins où le député a voté (au moins 20).")}` : ""}
     <h2 class="section-title">Ses ${d.votes.length} derniers votes enregistrés</h2>
-    <div class="card"><div class="legend" style="margin:0"><span><i class="dot p"></i>Pour <b>${cnt.pour}</b></span><span><i class="dot c"></i>Contre <b>${cnt.contre}</b></span><span><i class="dot a"></i>Abstention <b>${cnt.abst}</b></span>${cnt.nv ? `<span>Non-votant <b>${cnt.nv}</b></span>` : ""}</div></div>
+    <div class="card">${donut([{ l: "Pour", v: cnt.pour, c: "var(--pour)" }, { l: "Contre", v: cnt.contre, c: "var(--contre)" }, { l: "Abstention", v: cnt.abst, c: "var(--abst)" }], String(d.votes.length))}</div>
     <div id="list"></div>
     ${d.votes.length ? "" : empty("Aucun vote enregistré récemment.")}
     <a class="btn link" href="${anDepute(id)}" target="_blank" rel="noopener">Fiche officielle ${ICON.ext}</a>
@@ -378,6 +467,101 @@ async function viewDepute(id) {
       <div class="card-foot"><span class="badge neutre">A voté : ${lab[v.p]}</span><span>Résultat : ${s.sort === "adopte" ? "adopté" : s.sort === "rejete" ? "rejeté" : esc(s.sort)}</span></div></a>`;
   }, 20);
   $view.querySelector("#fav").onclick = (e) => { const on = toggleFav("deputes", id); e.currentTarget.classList.toggle("on", on); e.currentTarget.setAttribute("aria-pressed", on); };
+}
+
+const KIND_COLORS = { ensemble: "var(--ink)", amendement: "var(--contre)", article: "var(--abst)", censure: "var(--accent)", motion: "#b8a88a", autre: "var(--line)" };
+
+async function viewAnalyses() {
+  $view.innerHTML = skeleton(4);
+  const [st, groupes, meta] = await Promise.all([api("stats.json"), api("groupes.json"), api("meta.json").catch(() => null)]);
+  const gs = Object.values(groupes).filter((g) => g.sieges > 0).sort((a, b) => b.sieges - a.sieges);
+  const mois = st.mois.slice(-18);
+  const tot = st.sort.adopte + st.sort.rejete;
+  const th = Object.entries(st.themes).filter(([k]) => THEMES[k]).sort((a, b) => b[1].textes - a[1].textes);
+  const thMax = Math.max(...th.map(([, v]) => v.textes), 1);
+  $view.innerHTML = `
+    <h1 class="page-title">Analyses</h1>
+    <p class="page-sub">Chiffres calculés à partir des ${nf(meta?.nb.scrutins || tot)} ${term("scrutin public", "scrutins publics")} de la ${meta?.legislature || LEG}e législature.</p>
+    <div class="tiles">
+      ${tile(nf(meta?.nb.scrutins || tot), "Scrutins")}
+      ${tile(fpct(Math.round((1000 * st.sort.adopte) / (tot || 1)) / 10), "Adoptés")}
+      ${tile(nf(meta?.nb.dossiers || 0), "Dossiers")}
+      ${tile(nf(gs.length), "Groupes")}
+    </div>
+    <h2 class="section-title">Composition de l'Assemblée</h2>
+    <div class="card">${compositionHemi(gs)}</div>
+
+    <h2 class="section-title">Scrutins par mois</h2>
+    <div class="card">${monthBars(mois)}
+      <div class="legend" style="margin-top:12px"><span><i class="dot p"></i>Adoptés</span><span><i class="dot c"></i>Rejetés</span></div></div>
+
+    <h2 class="section-title">Types de votes</h2>
+    <div class="card">${donut(Object.entries(st.types).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ l: KIND[k] || k, v, c: KIND_COLORS[k] || "var(--line)" })), nf(Object.values(st.types).reduce((a, b) => a + b, 0)))}</div>
+
+    <h2 class="section-title">Cohésion des groupes</h2>
+    <div class="card">${hbars(gs.map((g) => ({ l: g.sigle || g.nom, v: g.cohesion, c: g.couleur, href: `#/groupe/${g.id}` })))}</div>
+    ${howto("Pour chaque scrutin, part des membres votants du groupe qui ont suivi la position majoritaire du groupe, puis moyenne sur tous les scrutins. 100 % = tous les votants du groupe votent toujours pareil.")}
+
+    <h2 class="section-title">Participation moyenne aux scrutins</h2>
+    <div class="card">${hbars(gs.map((g) => ({ l: g.sigle || g.nom, v: g.participation, c: g.couleur, href: `#/groupe/${g.id}` })))}</div>
+    ${howto("Pour chaque scrutin, nombre de membres du groupe ayant voté divisé par l'effectif du groupe, puis moyenne. Beaucoup de scrutins ont lieu en même temps que des réunions de commission : une participation basse ne veut pas dire absence de travail.")}
+
+    <h2 class="section-title">Accords entre groupes</h2>
+    <div class="card" style="overflow-x:auto">${heatmap(gs, st.accords)}</div>
+    ${howto("Part des scrutins où les deux groupes ont eu la même position majoritaire (pour, contre ou abstention). Plus la case est foncée, plus les deux groupes votent souvent pareil.")}
+
+    ${th.length ? `<h2 class="section-title">Textes par thème</h2>
+    <div class="card">${hbars(th.map(([k, v]) => ({ l: THEMES[k], v: v.textes, c: "var(--accent)" })), { max: thMax, unit: "" })}
+    <p class="notice">Thèmes détectés automatiquement à partir des mots du titre officiel.</p></div>` : ""}
+  `;
+}
+
+function heatmap(gs, acc) {
+  const cell = (a, b) => {
+    if (a.id === b.id) return `<span class="hm-c self"></span>`;
+    const v = (acc[a.id] || {})[b.id];
+    return `<span class="hm-c${v != null && v >= 55 ? " dk" : ""}" title="${esc(a.sigle)} / ${esc(b.sigle)} : ${fpct(v)}" style="--v:${v == null ? 0 : v / 100}">${v == null ? "" : Math.round(v)}</span>`;
+  };
+  return `<div class="hm" style="grid-template-columns:auto repeat(${gs.length}, minmax(24px,1fr))">
+    <span></span>${gs.map((g) => `<span class="hm-h" style="border-color:${esc(g.couleur)}">${esc(g.sigle || g.nom)}</span>`).join("")}
+    ${gs.map((a) => `<span class="hm-r"><i class="gdot" style="background:${esc(a.couleur)}"></i>${esc(a.sigle || a.nom)}</span>${gs.map((b) => cell(a, b)).join("")}`).join("")}
+  </div>`;
+}
+
+async function viewGroupe(id) {
+  $view.innerHTML = skeleton(4);
+  const [groupes, deps, st] = await Promise.all([api("groupes.json"), api("deputes.json"), api("stats.json")]);
+  const g = groupes[id];
+  if (!g) { $view.innerHTML = empty("Groupe introuvable."); return; }
+  const membres = deps.filter((d) => d.groupe === id);
+  const others = Object.entries(st.accords[id] || {}).filter(([o]) => groupes[o] && groupes[o].sieges > 0).sort((a, b) => b[1] - a[1]);
+  const gs = Object.values(groupes).filter((x) => x.sieges > 0).sort((a, b) => b.sieges - a.sieges);
+  const parts = membres.map((d) => d.part).filter((v) => v != null).sort((a, b) => a - b);
+  const med = parts.length ? parts[Math.floor(parts.length / 2)] : null;
+  $view.innerHTML = `
+    <div class="person" style="margin-top:18px"><span class="gbig" style="background:${esc(g.couleur || "var(--ink-3)")}">${esc((g.sigle || g.nom).slice(0, 4))}</span>
+      <div><h1 class="page-title" style="font-size:23px;margin:0">${esc(g.nom)}</h1><div class="muted small">${esc(g.sigle)} · ${g.sieges} députés</div></div></div>
+    <div class="card" style="margin-top:16px">${hemicycle(gs.flatMap((x) => Array.from({ length: x.sieges }, () => ({ c: x.id === id ? x.couleur || "var(--ink)" : "var(--absent)", t: x.nom }))))}
+      <p class="notice" style="text-align:center;margin:4px 0 0">${pct(g.sieges, gs.reduce((s, x) => s + x.sieges, 0)).toFixed(1).replace(".", ",")} % des sièges</p></div>
+    <div class="tiles">
+      ${tile(fpct(g.cohesion), "Cohésion", "votants alignés sur la majorité du groupe")}
+      ${tile(fpct(g.participation), "Participation moyenne", med != null ? `médiane des membres : ${fpct(med)}` : "")}
+    </div>
+    ${others.length ? `<h2 class="section-title">Vote comme…</h2>
+      <div class="card">${hbars(others.map(([o, v]) => ({ l: groupes[o].sigle || groupes[o].nom, v, c: groupes[o].couleur, href: `#/groupe/${o}` })))}</div>
+      ${howto("Part des scrutins où la position majoritaire de ce groupe a été la même que celle de l'autre groupe.")}` : ""}
+    <h2 class="section-title">Membres (${membres.length})</h2>
+    <div class="chips" id="sort">${[["nom", "Nom"], ["part", "Participation"], ["loyaute", "Vote comme le groupe"]].map(([k, l], i) => `<button class="chip${i ? "" : " on"}" data-s="${k}">${l}</button>`).join("")}</div>
+    <div id="list"></div>`;
+  const draw = (key) => {
+    const list = [...membres].sort((a, b) => key === "nom" ? norm(a.nom).localeCompare(norm(b.nom)) : (b[key] ?? -1) - (a[key] ?? -1));
+    $view.querySelector("#list").innerHTML = list.map((d) => personRow(d, groupes, `<span class="muted small" style="text-align:right">${key === "loyaute" ? fpct(d.loyaute) : fpct(d.part)}<br><span style="font-size:11px">${key === "loyaute" ? "avec le groupe" : "participation"}</span></span>`)).join("");
+  };
+  draw("nom");
+  $view.onclick = (e) => {
+    const s = e.target.closest("[data-s]");
+    if (s) { $view.querySelectorAll("#sort .chip").forEach((c) => c.classList.toggle("on", c === s)); draw(s.dataset.s); }
+  };
 }
 
 async function viewFavoris() {
@@ -441,7 +625,9 @@ const ROUTES = [
   [/^#\/texte\/(.+)$/, "textes", viewTexte],
   [/^#\/deputes$/, "deputes", viewDeputes],
   [/^#\/depute\/(.+)$/, "deputes", viewDepute],
-  [/^#\/favoris$/, "favoris", viewFavoris],
+  [/^#\/favoris$/, "", viewFavoris],
+  [/^#\/analyses$/, "analyses", viewAnalyses],
+  [/^#\/groupe\/(.+)$/, "analyses", viewGroupe],
   [/^#\/recherche(?:\/(.*))?$/, "recherche", (q) => viewRecherche(q ? decodeURIComponent(q) : "")],
   [/^#\/lexique$/, "", viewLexique],
 ];
